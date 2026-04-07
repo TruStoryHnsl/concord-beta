@@ -1,8 +1,18 @@
 # Concord (beta)
 
 > Active R&D — native peer-to-peer mesh chat platform. A parallel research track to [concord](https://github.com/TruStoryHnsl/concord) (production, Matrix-based).
+>
+> **Concord is bitchat + Discord + crypto.**
 
-Concord (beta) is an experimental implementation of **native P2P mesh chat** built on Rust + Tauri 2 + libp2p. The goal is a chat platform that **keeps working when the internet doesn't**, and that **never sends a message off your local network unless you want it to**. Where the production [concord](https://github.com/TruStoryHnsl/concord) uses a central Matrix homeserver, concord-beta is exploring whether the same product — text, voice, presence, trust, the works — can be delivered with **no central server at all**. Every device runs the same code and participates as both client and host.
+That tagline is a key to reading the rest of this document:
+
+- **bitchat** — the infrastructure-free mesh transport. No central server, no homeserver, no SFU; every device is a node and the network organizes itself across LAN, WiFi Direct, BLE, and mesh tunnels.
+- **Discord** — the server / channel / voice / friends product surface that people already know how to use. The mesh underneath should be invisible to a normal user.
+- **crypto** — the [mesh map](#6-the-mesh-map--zero-trust-common-truth): a shared, tamper-evident, distributed ledger of network events that gives a fully decentralized system a zero-trust source of common truth, with the same value proposition as a cryptocurrency's public ledger.
+
+Concord (beta) is an experimental implementation built on Rust + Tauri 2 + libp2p. The goals are a chat platform that **keeps working when the internet doesn't**, that **never sends a message off your local network unless you want it to**, and that **records the network's shared events on an immutable, decentralized mesh map** that no single node can edit or erase. Where the production [concord](https://github.com/TruStoryHnsl/concord) uses a central Matrix homeserver, concord-beta is exploring whether the same product can be delivered with **no central server at all** — every device runs the same code and participates as both client and host.
+
+**The two pillars** of the architecture are **the mesh transport** (no central server) and **the mesh map** (zero-trust common truth). Everything else in this document serves one or both of those.
 
 This repository documents an architecture in active development. The design goals below describe the target; the [current roadblocks](#current-roadblocks) describe the open problems being worked on right now.
 
@@ -92,7 +102,31 @@ Local forums propagate via TTL-bounded flood (`hop_count` / `max_hops`); global 
 
 Compromising any one layer leaves the others intact.
 
-### 6. Mesh map as a distributed database
+### 6. The mesh map — zero-trust common truth
+
+**The mesh map is the second pillar of Concord.** It is a structural component of the networking protocol — not a feature, not an add-on, not optional infrastructure. It is the layer that gives a fully decentralized network a shared source of truth that no single node can lie about, edit, or erase.
+
+#### Why it exists
+
+The value proposition is borrowed directly from cryptocurrencies. A public, distributed ledger where every participating node holds a verifiable copy of the same record, where new entries propagate immediately to neighbours, and where no single party — not even the original author — can edit or retract past entries. The same property that makes a cryptocurrency's transaction history credible without a central bank is what makes Concord's mesh map credible without a central server. The mesh map is, deliberately, *that* idea applied to a chat network.
+
+Without the mesh map, a fully decentralized chat system has no way to answer questions like *"is this place real?"*, *"did this call actually happen?"*, *"how trusted is this peer in the broader network?"* — or, critically, no way to answer them in a manner that doesn't trust whoever is currently telling you the answer. The map is how Concord answers those questions zero-trust.
+
+#### What it records
+
+Network-level events that the participants have agreed are worth shared truth: nodes coming online, places being created, calls being initiated and joined, attestations being signed, locale boundaries, capabilities, presence. **Not every chat message lives on the ledger** — only the structural events that the network's coordination depends on. The chat itself flows over GossipSub and is encrypted per-channel; the *fact that a channel exists* and *the fact that a call happened in it* are what get recorded on the map.
+
+#### Anonymity vs. participation — a deliberate tradeoff
+
+A node on Concord can be fully anonymous: pseudonymous Ed25519 identity, no real-world linkage required, no accounts, no email. But anonymous nodes also have minimal weight in the trust system and minimal visibility into the map. As a node participates more — signs attestations, hosts places, vouches for peers, accumulates engagement, joins calls that get recorded — its presence on the map deepens and its access to the broader graph grows.
+
+**Users choose their level of participation, and their participation determines the utility they can extract from Concord.** Lurkers can lurk, with minimal footprint and minimal utility. Backbone nodes get the full picture. The tradeoff is explicit, opt-in, and irreversible per-event: you cannot retroactively scrub a call you joined from the ledger any more than you can scrub a Bitcoin transaction.
+
+#### Immutable and immediate
+
+Once an event is written to the map, it propagates to surrounding nodes immediately and cannot be retracted by the originating node. There is no "delete my history" because the history is no longer the originator's to delete — it has already been gossiped to neighbours who hold their own verified copies. Tombstones exist for graceful entry expiration (a place that's been abandoned, a call that's ended), but tombstones are themselves entries on the ledger, not erasures of past entries. **No single node can edit the map or erase its steps.**
+
+#### Technical model
 
 Every entity (node, place, call, locale) has a deterministic 32-byte address derived via `HMAC-SHA256("concord-mesh-address-v1", identifier)`. Map entries gossip across the mesh with **confidence tiers** that decay without re-verification:
 
@@ -104,6 +138,19 @@ Every entity (node, place, call, locale) has a deterministic 32-byte address der
 | Speculative | 0.25 | Received from an untrusted source |
 
 Sync is a three-phase gossip protocol over `concord/mesh/map-sync`: digest broadcast every 60 s → delta request when remote has newer data → delta response (max 50 entries per batch). Friends get a 15 s sync cooldown and automatic confidence upgrades.
+
+Entry types currently defined:
+
+| Kind | Payload | Purpose |
+|------|---------|---------|
+| **Node** | display_name, capabilities, engagement_score, trust_rating, location (~5 mi), portal_url | Node presence and reputation |
+| **Place** | name, owner, governance, visibility, member_count, hosting_nodes, channels | Server / organization definition |
+| **CallLedger** | participants, call_type, hosting_node, status, expires_at | Active call tracking |
+| **Locale** | hierarchical partition | Mesh topology structure |
+
+#### Planned: RuView — a queryable information layer on top of the map
+
+**RuView** is a planned extension that sits on top of the mesh map as an additional layer of information viewable through the map. Where the base map records the structural events (who's online, what places exist, which calls are happening, who attested what), RuView surfaces a richer, queryable view of that same data — turning the raw distributed ledger into something the human at the keyboard can usefully read, navigate, filter, and act on. The full RuView specification is forthcoming; expect it to land as its own design document once the underlying mesh map persistence ([roadblock #5](#5-mesh-map-sync-not-wired-to-persistence-high)) is wired up.
 
 ### 7. Web of trust
 
