@@ -2,11 +2,40 @@
 
 > Active R&D — native peer-to-peer mesh chat platform. A parallel research track to [concord](https://github.com/TruStoryHnsl/concord) (production, Matrix-based).
 
-Concord (beta) is an experimental implementation of **native P2P mesh chat** built on Rust + Tauri 2 + libp2p. Where the production [concord](https://github.com/TruStoryHnsl/concord) uses a central Matrix homeserver, concord-beta is exploring whether the same product — text, voice, presence, trust, the works — can be delivered with **no central server at all**. Every device runs the same code and participates as both client and host.
+Concord (beta) is an experimental implementation of **native P2P mesh chat** built on Rust + Tauri 2 + libp2p. The goal is a chat platform that **keeps working when the internet doesn't**, and that **never sends a message off your local network unless you want it to**. Where the production [concord](https://github.com/TruStoryHnsl/concord) uses a central Matrix homeserver, concord-beta is exploring whether the same product — text, voice, presence, trust, the works — can be delivered with **no central server at all**. Every device runs the same code and participates as both client and host.
 
 This repository documents an architecture in active development. The design goals below describe the target; the [current roadblocks](#current-roadblocks) describe the open problems being worked on right now.
 
 **Status as of 2026-04-05:** ~27,800 LOC (16,893 Rust + 10,921 TypeScript), 275 Rust tests passing, validated cross-network PoC (LAN ↔ WireGuard tunnel) between two physical machines.
+
+---
+
+## Who it's for
+
+Concord (beta) is being built primarily with two real-world use cases in mind. Both are inherently well-suited to a peer-to-peer mesh architecture and both work without any central server, third-party account, or required internet connection.
+
+### 1. Family resilience comms — when the internet goes down
+
+A self-organizing communication mesh for a household (or a cluster of neighbouring households) that should keep working when the ISP, the power grid, or the open internet itself is unavailable. Every device in the home — phones, tablets, laptops, the desktop in the office — runs a Concord node. When everyone is on the same WiFi, mDNS discovery is automatic and messages flow over the LAN with no infrastructure beyond the router. When the infrastructure-free transports land ([#8](#8-infrastructure-free-transports-unimplemented-medium-off-grid-use-case)), the same devices will eventually keep talking even when the router itself is down, by hopping over BLE, WiFi Direct, or a device-hosted access point.
+
+**The bar is:** *the family group chat keeps working when nothing else does.* Storms, ISP outages, evacuations, area-wide cell-network congestion, the kids talking to each other across the house when the WiFi is dropping packets — all of those should be non-events for Concord (beta), not failure modes.
+
+### 2. Parentally-monitored local chat for young kids
+
+A locally-hosted texting app for children too young to be navigating the open internet privately. A parent runs a Concord node on a home device that acts as the family server. The kids' devices connect to it over the LAN — **no accounts on outside services, no public discovery, no inbound traffic from strangers, no message data leaving the home network.** The parent's node holds the admin keys for the family server, so they own the moderation surface for their kids' conversations the same way they own the router or the home WiFi password.
+
+**The bar is:** *a 7-year-old can text grandma, a sibling, or a friend whose family also runs Concord, without their messages or metadata ever touching a third-party service, and without the parent having to surveil a stranger's app.* The parent stays in the loop by being the host, not by reading over a shoulder.
+
+### What these use cases need from the roadblocks list
+
+Both use cases are viable on the current architecture *almost*. Two roadblocks below need to land before either is deployable to a non-technical household:
+
+- **[#4 — Server keys not distributed to joining members](#4-server-keys-not-distributed-to-joining-members-high)** — without this, only the parent who created the family server can read messages in it. Critical blocker for *both* use cases.
+- **[#1 — No message history sync](#1-no-message-history-sync-critical)** — without this, any device that sleeps loses messages permanently. Phones sleeping is the common case, so this is critical for family use.
+
+Everything else on the roadblocks list is desirable but not gating. The voice SFU ([#3](#3-voice-pipeline-doesnt-scale-past-two-participants-high-for-voice)) doesn't matter for typical household sizes. Infrastructure-free transports ([#8](#8-infrastructure-free-transports-unimplemented-medium-off-grid-use-case)) are nice-to-have for the resilience case but not strictly required as long as the home WiFi router still functions. CRDT server state ([#2](#2-no-crdt--distributed-server-state-high)) is mostly an issue for multi-admin servers; a single-parent home server doesn't hit the divergence problem.
+
+**Net result:** the two use cases above are realistically about *two roadblocks away* from being deployable, not twelve.
 
 ---
 
