@@ -1,0 +1,14 @@
+wing: concord_beta
+rooms:
+- name: crates
+  description: Files from crates/
+- name: design
+  description: Files from design/
+- name: frontend
+  description: Files from frontend/
+- name: scripts
+  description: Files from scripts/
+- name: src_tauri
+  description: Files from src-tauri/
+- name: general
+  description: Files that don't fit other rooms
